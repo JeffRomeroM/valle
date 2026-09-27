@@ -37,8 +37,8 @@
           <Icon icon="solar:wallet-money-bold-duotone" />
         </div>
         <div class="metric-info">
-          <span class="metric-label">Ventas Totales</span>
-          <h3>C$ {{ kpis.totalVentas.toLocaleString() }}</h3>
+          <span class="metric-label">Total Recarga</span>
+          <h3>C$ {{ kpis.totalRecarga.toLocaleString() }}</h3>
           <small>{{ kpis.cantidadVentas }} transacciones</small>
         </div>
       </div>
@@ -81,8 +81,8 @@
               <small>{{ item.fecha }}</small>
             </div>
             <div class="item-values">
-              <span class="text-danger">Debe: C$ {{ (item.monto - (item.abonado || 0)).toFixed(2) }}</span>
-              <span class="text-muted">Total: C$ {{ item.monto }}</span>
+              <span class="text-danger">Debe: C$ {{ (Number(item.recarga) - Number(item.abonado || 0)).toFixed(2) }}</span>
+              <span class="text-muted">Total Recarga: C$ {{ item.recarga }}</span>
             </div>
           </div>
         </div>
@@ -100,14 +100,14 @@
           <div class="dist-row">
             <div class="dist-info">
               <span class="dot contado"></span>
-              <span>Ventas de Contado</span>
+              <span>Recargas de Contado</span>
             </div>
             <strong>C$ {{ kpis.montoContado.toLocaleString() }}</strong>
           </div>
           <div class="dist-row">
             <div class="dist-info">
               <span class="dot credito"></span>
-              <span>Ventas al Crédito (Total)</span>
+              <span>Recargas al Crédito (Total)</span>
             </div>
             <strong>C$ {{ kpis.montoCredito.toLocaleString() }}</strong>
           </div>
@@ -121,8 +121,6 @@
         </div>
       </div>
     </div>
-
-    
   </div>
 </template>
 
@@ -140,7 +138,7 @@ const creditosPendientesList = ref([])
 const ventasFiltradasList = ref([])
 
 const kpis = ref({
-  totalVentas: 0,
+  totalRecarga: 0,
   cantidadVentas: 0,
   totalGanancias: 0,
   deudaPendienteTotal: 0,
@@ -184,7 +182,7 @@ function procesarFiltrosYMetricas() {
     return true
   })
 
-  let tVentas = 0
+  let tRecarga = 0
   let tGanancias = 0
   let tDeuda = 0
   let cActivos = 0
@@ -194,19 +192,19 @@ function procesarFiltrosYMetricas() {
   let creditosPendientes = []
 
   filtradas.forEach(v => {
-    const monto = Number(v.monto || 0)
+    const recarga = Number(v.recarga || 0)
     const ganancia = Number(v.ganancia || 0)
     const abonado = Number(v.abonado || 0)
 
-    tVentas += monto
+    tRecarga += recarga
     tGanancias += ganancia
 
     if (v.tipo_pago === 'CONTADO') {
-      mContado += monto
+      mContado += recarga
     } else if (v.tipo_pago === 'CREDITO') {
-      mCredito += monto
+      mCredito += recarga
       tAbonado += abonado
-      const pendiente = monto - abonado
+      const pendiente = recarga - abonado
       if (pendiente > 0) {
         cActivos++
         tDeuda += pendiente
@@ -216,7 +214,7 @@ function procesarFiltrosYMetricas() {
   })
 
   kpis.value = {
-    totalVentas: tVentas,
+    totalRecarga: tRecarga,
     cantidadVentas: filtradas.length,
     totalGanancias: tGanancias,
     deudaPendienteTotal: tDeuda,
@@ -499,32 +497,6 @@ onMounted(() => {
 .dot.credito { background: #f59e0b; }
 .dot.abonado { background: #3b82f6; }
 
-/* TABLA RECIENTE */
-.table-responsive {
-  width: 100%;
-  overflow-x: auto;
-}
-
-.recent-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.8rem;
-  text-align: left;
-}
-
-.recent-table th {
-  background: #f8fafc;
-  color: #64748b;
-  padding: 0.5rem;
-  font-weight: 600;
-}
-
-.recent-table td {
-  padding: 0.5rem;
-  border-bottom: 1px solid #f1f5f9;
-  color: #334155;
-}
-
 .badge {
   font-size: 0.6rem;
   font-weight: 700;
@@ -533,8 +505,6 @@ onMounted(() => {
   text-transform: uppercase;
 }
 
-.badge.contado { background: #dcfce7; color: #15803d; }
-.badge.credito { background: #fef3c7; color: #b45309; }
 .badge.warning { background: #fef3c7; color: #b45309; }
 
 .empty-report {

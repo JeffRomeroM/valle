@@ -5,9 +5,7 @@
         <Icon icon="solar:shop-bold-duotone" class="header-logo-icon" />
         <h1>Gestión de Ventas</h1>
       </div>
-      <button class="add-btn" @click="openModal()">
-        <Icon icon="solar:add-circle-bold" /> <span class="btn-text">Nueva</span>
-      </button>
+      
     </header>
 
     <!-- FILTROS -->
@@ -46,13 +44,15 @@
 
     <!-- Totales -->
     <div class="totales-grid">
+      
       <div class="total-card">
         <Icon icon="solar:wallet-money-bold-duotone" class="total-icon monto" />
         <div class="total-info">
-          <span class="total-label">Monto Total</span>
-          <h3>C$ {{ totalMonto.toLocaleString() }}</h3>
+          <span class="total-label">Total Recarga</span>
+          <h3>C$ {{ totalRecarga.toLocaleString() }}</h3>
         </div>
       </div>
+
       <div class="total-card">
         <Icon icon="solar:chart-square-bold-duotone" class="total-icon ganancia" />
         <div class="total-info">
@@ -61,6 +61,10 @@
         </div>
       </div>
     </div>
+    <button class="add-btn" @click="openModal()">
+      <Icon icon="solar:add-circle-bold" /> <span class="btn-text">Agregar</span>
+    </button>
+    
 
     <!-- LISTADO DE TARJETAS -->
     <div class="cards" v-if="ventasPaginadas.length > 0">
@@ -72,8 +76,8 @@
            }">
         <div class="card-body" @click="openModal(venta)">
           <!-- Fecha en la esquina superior derecha -->
+          
           <span class="card-date-badge"><Icon icon="solar:calendar-linear" /> {{ venta.fecha }}</span>
-
           <div class="card-header-info">
             <span class="cliente"><Icon icon="solar:user-bold" /> {{ venta.cliente }}</span>
             <span class="badge" :class="getBadgeClass(venta)">
@@ -255,8 +259,8 @@ const meses = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto"
 const emptyForm = {
   id: null,
   cliente: '',
-  recarga: 0,
-  monto: 0,
+  recarga: null,
+  monto: null,
   tipo_pago: 'CONTADO',
   abonado: 0,
   ganancia: 0,
@@ -405,7 +409,7 @@ const ventasFiltradas = computed(() => {
   })
 })
 
-const totalMonto = computed(() => ventasFiltradas.value.reduce((sum, v) => sum + Number(v.monto || 0), 0))
+const totalRecarga = computed(() => ventasFiltradas.value.reduce((sum, v) => sum + Number(v.recarga || 0), 0))
 const totalGanancia = computed(() => ventasFiltradas.value.reduce((sum, v) => sum + Number(v.ganancia || 0), 0))
 
 const totalPaginas = computed(() => Math.ceil(ventasFiltradas.value.length / elementosPorPagina) || 1)
@@ -442,7 +446,7 @@ watch([filtroPago, filtroCliente, filtroMes, filtroGeneral], () => {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-}
+}t
 
 .header-logo-icon {
   font-size: 26px;
@@ -466,6 +470,8 @@ watch([filtroPago, filtroCliente, filtroMes, filtroGeneral], () => {
   display: flex;
   align-items: center;
   gap: 0.3rem;
+  margin-bottom: 10px;
+  margin-left: 70%;
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
 }
@@ -650,7 +656,7 @@ watch([filtroPago, filtroCliente, filtroMes, filtroGeneral], () => {
   flex-direction: column;
   gap: 0.3rem;
   margin-bottom: 0.6rem;
-  padding-right: 85px; /* Espacio para que no choque con la fecha */
+  margin-top:20px; /* Espacio para que no choque con la fecha */
 }
 
 .cliente {
@@ -660,7 +666,6 @@ watch([filtroPago, filtroCliente, filtroMes, filtroGeneral], () => {
   display: flex;
   align-items: center;
   gap: 0.3rem;
-  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }

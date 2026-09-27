@@ -368,7 +368,7 @@ watch([filtroCliente, filtroGeneral], () => {
   margin-bottom: 1rem;
 }
 
-.total-card {
+.total-card { 
   background: #ffffff;
   padding: 0.75rem;
   border-radius: 12px;

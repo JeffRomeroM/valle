@@ -24,6 +24,10 @@
         <Icon icon="solar:user-plus-bold" class="nav-icon" />
         <span class="label">Clientes</span>
       </RouterLink>
+      <RouterLink to="/juego" class="nav-item">
+        <Icon icon="solar:gamepad-bold-duotone" class="nav-icon" />
+        <span class="label">Juego</span>
+      </RouterLink>
     </div>
   </nav>
 </template>
