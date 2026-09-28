@@ -5,28 +5,29 @@
     </div>
 
     <div class="nav-links">
-      <RouterLink to="/dashboard" class="nav-item">
-        <Icon icon="solar:home-2-bold-duotone" class="nav-icon" />
-        <span class="label">Inicio</span>
-      </RouterLink>
-
       <RouterLink to="/ventas" class="nav-item">
-        <Icon icon="solar:cart-large-2-bold-duotone" class="nav-icon" />
+        <Icon icon="mdi:cart" class="nav-icon" />
         <span class="label">Ventas</span>
       </RouterLink>
 
       <RouterLink to="/creditos" class="nav-item">
-        <Icon icon="solar:wallet-money-bold-duotone" class="nav-icon" />
+        <Icon icon="mdi:credit-card-outline" class="nav-icon" />
         <span class="label">Créditos</span>
       </RouterLink>
 
       <RouterLink to="/clientes" class="nav-item">
-        <Icon icon="solar:user-plus-bold" class="nav-icon" />
+        <Icon icon="mdi:account-group" class="nav-icon" />
         <span class="label">Clientes</span>
       </RouterLink>
+      
+      <RouterLink to="/dashboard" class="nav-item">
+        <Icon icon="mdi:chart-bar" class="nav-icon" />
+        <span class="label">Reportes</span>
+      </RouterLink>
+
       <RouterLink to="/juego" class="nav-item">
-        <Icon icon="solar:gamepad-bold-duotone" class="nav-icon" />
-        <span class="label">Juego</span>
+        <Icon icon="mdi:controller-classic-outline" class="nav-icon" />
+        <span class="label">Juegos</span>
       </RouterLink>
     </div>
   </nav>
@@ -125,7 +126,7 @@ import { Icon } from '@iconify/vue'
     justify-content: space-around;
     align-items: center;
     width: 100%;
-    height: 64px;
+    height: 54px; /* Ajustado exactamente a 54px */
     bottom: 0;
     top: auto;
     border-top: 1px solid #f1f5f9;
@@ -142,13 +143,23 @@ import { Icon } from '@iconify/vue'
     flex-direction: row;
     justify-content: space-around;
     width: 100%;
-    height: 100%;
+    height: 54px;
   }
 
   .nav-item {
     flex: 1;
-    height: 100%;
+    height: 54px;
     justify-content: center;
+    padding: 0;
+    gap: 2px;
+  }
+
+  .nav-icon {
+    font-size: 20px; /* Ligeramente más compacto para 54px */
+  }
+
+  .label {
+    font-size: 10px;
   }
 
   .router-link-active::before {

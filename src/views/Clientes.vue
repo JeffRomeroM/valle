@@ -5,9 +5,11 @@
         <Icon icon="solar:users-group-rounded-bold-duotone" class="header-logo-icon" />
         <h1>Gestión de Clientes</h1>
       </div>
-      <button class="add-btn" @click="openModal()">
-        <Icon icon="solar:user-plus-bold" /> <span class="btn-text">Nuevo</span>
-      </button>
+      <!-- Indicador de Red / Sincronización -->
+      <div class="sync-status" :class="isOnline ? 'online' : 'offline'">
+        <span class="dot"></span>
+        {{ isOnline ? (syncing ? 'Sincronizando...' : 'En línea') : 'Sin conexión' }}
+      </div>
     </header>
 
     <!-- FILTROS / BUSCADOR -->
@@ -30,6 +32,10 @@
         </div>
       </div>
     </div>
+
+    <button class="add-btn" @click="openModal()">
+      <Icon icon="solar:user-plus-bold" /> <span class="btn-text">Nuevo</span>
+    </button>
 
     <!-- LISTADO DE TARJETAS -->
     <div class="cards" v-if="clientesPaginados.length > 0">
@@ -107,7 +113,7 @@
         <div class="modal confirm-modal">
           <Icon icon="solar:danger-triangle-bold-duotone" class="warn-icon" />
           <h3>¿Eliminar cliente?</h3>
-          <p>Esta acción eliminará el registro localmente.</p>
+          <p>Esta acción eliminará el registro localmente y se sincronizará.</p>
           <div class="modal-actions">
             <button class="delete-confirm-btn" @click="deleteCliente">Eliminar</button>
             <button class="cancel-btn" @click="confirmOpen = false">Cancelar</button>
@@ -119,13 +125,17 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { Icon } from '@iconify/vue'
+import { supabase } from '../supabase/supabase.js'
 
 const clientes = ref([])
 const modalOpen = ref(false)
 const confirmOpen = ref(false)
 const clienteEliminar = ref(null)
+
+const isOnline = ref(navigator.onLine)
+const syncing = ref(false)
 
 const filtroGeneral = ref('')
 const paginaActual = ref(1)
@@ -134,7 +144,8 @@ const elementosPorPagina = 6
 const emptyForm = { id: null, nombre: '', telefono: '' }
 const form = ref({ ...emptyForm })
 
-onMounted(() => {
+onMounted(async () => {
+  // 1. Cargar datos locales inmediatamente para renderizado rápido
   const stored = localStorage.getItem('valle_clientes')
   if (stored) {
     try {
@@ -142,17 +153,123 @@ onMounted(() => {
     } catch (e) {
       clientes.value = []
     }
-  } else {
-    clientes.value = [
-      { id: 1, nombre: 'Juan Pérez', telefono: '88881111' },
-      { id: 2, nombre: 'María Rodríguez', telefono: '88882222' }
-    ]
-    guardarLocalStorage()
+  }
+
+  // 2. Escuchar eventos de red
+  window.addEventListener('online', handleOnlineStatus)
+  window.addEventListener('offline', () => { isOnline.value = false })
+
+  // 3. Sincronizar al iniciar si hay internet
+  if (isOnline.value) {
+    await sincronizarConSupabase()
   }
 })
 
+onUnmounted(() => {
+  window.removeEventListener('online', handleOnlineStatus)
+  window.removeEventListener('offline', () => { isOnline.value = false })
+})
+
+function handleOnlineStatus() {
+  isOnline.value = true
+  sincronizarConSupabase()
+}
+
 function guardarLocalStorage() {
   localStorage.setItem('valle_clientes', JSON.stringify(clientes.value))
+}
+
+// Función auxiliar para limpiar el objeto antes de enviarlo a Supabase (evita errores por columnas extra)
+function limpiarObjetoParaSupabase(cliente) {
+  return {
+    id: String(cliente.id),
+    nombre: cliente.nombre,
+    telefono: cliente.telefono || ''
+  }
+}
+
+// COLA DE SINCRONIZACIÓN Y ACCESO A SUPABASE
+async function sincronizarConSupabase() {
+  if (!isOnline.value || syncing.value) return
+  syncing.value = true
+
+  try {
+    const colaPendiente = JSON.parse(localStorage.getItem('valle_clientes_cola') || '[]')
+    
+    // 1. Procesar ítem por ítem y limpiar de la cola solo los exitosos
+    if (colaPendiente.length > 0) {
+      const nuevaCola = []
+      
+      for (const item of colaPendiente) {
+        if (item._accion === 'delete') {
+          const { error } = await supabase.from('clientes_xochil').delete().eq('id', item.id)
+          if (error) {
+            console.error('Error sincronizando eliminación:', error)
+            nuevaCola.push(item) // Mantenemos en cola si falló
+          }
+        } else {
+          const payloadLimpio = limpiarObjetoParaSupabase(item)
+          const { error } = await supabase.from('clientes_xochil').upsert(payloadLimpio, { onConflict: 'id' })
+          
+          if (error) {
+            console.error('Error sincronizando ítem:', error)
+            nuevaCola.push(item) // Mantenemos en cola si falló
+          }
+        }
+      }
+      
+      // Actualizamos la cola con los que realmente fallaron (si hubo alguno)
+      if (nuevaCola.length > 0) {
+        localStorage.setItem('valle_clientes_cola', JSON.stringify(nuevaCola))
+      } else {
+        localStorage.removeItem('valle_clientes_cola')
+      }
+    }
+
+    // 2. Obtener datos actualizados desde Supabase de forma segura
+    const { data, error } = await supabase
+      .from('clientes_xochil')
+      .select('*')
+      .order('nombre', { ascending: true })
+
+    if (!error && data) {
+      // FUSIÓN SEGURA: Si hay elementos en la cola pendiente, 
+      // asegurémonos de no borrarlos visualmente si el servidor aún no los refleja.
+      const colaActual = JSON.parse(localStorage.getItem('valle_clientes_cola') || '[]')
+      const idsPendientes = new Set(colaActual.map(i => i.id))
+      
+      // Mapeamos los datos de Supabase y agregamos los locales pendientes que falten
+      const mapRemoto = new Map(data.map(c => [c.id, c]))
+      
+      // Asegurar que los clientes locales actuales que están en la cola no se pierdan
+      clientes.value.forEach(localC => {
+        if (idsPendientes.has(localC.id) && !mapRemoto.has(localC.id)) {
+          data.push(localC) // Lo retenemos visualmente hasta que la BD lo procese
+        }
+      })
+
+      // Ordenar nuevamente por nombre
+      data.sort((a, b) => (a.nombre || '').localeCompare(b.nombre || ''))
+
+      clientes.value = data
+      guardarLocalStorage()
+    }
+  } catch (e) {
+    console.error('Error de red al sincronizar clientes:', e)
+  } finally {
+    syncing.value = false
+  }
+}
+
+function registrarEnCola(cliente, accion = 'upsert') {
+  const cola = JSON.parse(localStorage.getItem('valle_clientes_cola') || '[]')
+  const index = cola.findIndex(item => item.id === cliente.id)
+  if (index !== -1) {
+    cola[index] = { ...cliente, _accion: accion }
+  } else {
+    cola.push({ ...cliente, _accion: accion })
+  }
+  localStorage.setItem('valle_clientes_cola', JSON.stringify(cola))
 }
 
 function openModal(cliente = null) {
@@ -170,24 +287,49 @@ function confirmDelete(cliente) {
   confirmOpen.value = true
 }
 
-function deleteCliente() {
-  clientes.value = clientes.value.filter(c => c.id !== clienteEliminar.value.id)
+async function deleteCliente() {
+  const idAEliminar = clienteEliminar.value.id
+  clientes.value = clientes.value.filter(c => c.id !== idAEliminar)
   guardarLocalStorage()
+
+  if (isOnline.value) {
+    const { error } = await supabase.from('clientes_xochil').delete().eq('id', idAEliminar)
+    if (error) registrarEnCola({ id: idAEliminar }, 'delete')
+  } else {
+    registrarEnCola({ id: idAEliminar }, 'delete')
+  }
+
   confirmOpen.value = false
   clienteEliminar.value = null
 }
 
-function saveCliente() {
-  if (form.value.id) {
+async function saveCliente() {
+  const esNuevo = !form.value.id
+
+  if (esNuevo) {
+    form.value.id = 'c_' + Date.now() + Math.random().toString(36).substring(2, 7)
+    clientes.value.unshift({ ...form.value })
+  } else {
     const index = clientes.value.findIndex(c => c.id === form.value.id)
     if (index !== -1) {
       clientes.value[index] = { ...form.value }
     }
-  } else {
-    form.value.id = Date.now()
-    clientes.value.unshift({ ...form.value })
   }
+
   guardarLocalStorage()
+
+  const payloadLimpio = limpiarObjetoParaSupabase(form.value)
+
+  if (isOnline.value) {
+    const { error } = await supabase.from('clientes_xochil').upsert(payloadLimpio, { onConflict: 'id' })
+    if (error) {
+      console.error('Error al guardar en Supabase, enviando a cola:', error)
+      registrarEnCola(form.value, 'upsert')
+    }
+  } else {
+    registrarEnCola(form.value, 'upsert')
+  }
+
   closeModal()
 }
 
@@ -195,7 +337,7 @@ const clientesFiltrados = computed(() => {
   return clientes.value.filter(c => {
     if (!filtroGeneral.value) return true
     const texto = filtroGeneral.value.toLowerCase()
-    const nombreMatch = c.nombre.toLowerCase().includes(texto)
+    const nombreMatch = c.nombre && c.nombre.toLowerCase().includes(texto)
     const telefonoMatch = c.telefono && c.telefono.toLowerCase().includes(texto)
     return nombreMatch || telefonoMatch
   })
@@ -248,6 +390,25 @@ watch(filtroGeneral, () => {
   color: #0f172a;
 }
 
+/* Indicador de Red */
+.sync-status {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.25rem 0.6rem;
+  border-radius: 9999px;
+}
+.sync-status.online { background: #dcfce7; color: #15803d; }
+.sync-status.offline { background: #fee2e2; color: #b91c1c; }
+.sync-status .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
 .add-btn {
   background: #3b82f6;
   color: #fff;
@@ -259,6 +420,8 @@ watch(filtroGeneral, () => {
   display: flex;
   align-items: center;
   gap: 0.3rem;
+  margin-bottom: 10px;
+  margin-left: auto;
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
 }

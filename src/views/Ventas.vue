@@ -6,6 +6,13 @@
         <h1>Gestión de Ventas</h1>
       </div>
       
+      <!-- Indicador de Red (Sin botón manual) -->
+      <div class="header-actions-right">
+        <div class="sync-status" :class="isOnline ? 'online' : 'offline'">
+          <span class="dot"></span>
+          {{ isOnline ? (syncing ? 'Sincronizando...' : 'En línea') : 'Sin conexión' }}
+        </div>
+      </div>
     </header>
 
     <!-- FILTROS -->
@@ -44,7 +51,6 @@
 
     <!-- Totales -->
     <div class="totales-grid">
-      
       <div class="total-card">
         <Icon icon="solar:wallet-money-bold-duotone" class="total-icon monto" />
         <div class="total-info">
@@ -61,10 +67,10 @@
         </div>
       </div>
     </div>
+
     <button class="add-btn" @click="openModal()">
-      <Icon icon="solar:add-circle-bold" /> <span class="btn-text">Agregar</span>
+      <Icon icon="solar:add-circle-bold" /> <span class="btn-text">Agregar Venta</span>
     </button>
-    
 
     <!-- LISTADO DE TARJETAS -->
     <div class="cards" v-if="ventasPaginadas.length > 0">
@@ -75,8 +81,6 @@
              'cancelada-card': esCancelado(venta) 
            }">
         <div class="card-body" @click="openModal(venta)">
-          <!-- Fecha en la esquina superior derecha -->
-          
           <span class="card-date-badge"><Icon icon="solar:calendar-linear" /> {{ venta.fecha }}</span>
           <div class="card-header-info">
             <span class="cliente"><Icon icon="solar:user-bold" /> {{ venta.cliente }}</span>
@@ -95,7 +99,6 @@
               <span class="value">C$ {{ venta.monto }}</span>
             </div>
             
-            <!-- Detalles adicionales si es crédito -->
             <template v-if="venta.tipo_pago === 'CREDITO'">
               <div class="detail-row">
                 <span class="label">Abonado:</span>
@@ -155,6 +158,12 @@
           </div>
 
           <form @submit.prevent="saveVenta" class="modal-form">
+            <!-- FECHA ARRIBA -->
+            <div class="form-group">
+              <label>Fecha de Venta</label>
+              <input type="date" v-model="form.fecha" required class="form-control" />
+            </div>
+
             <div class="form-group">
               <label>Cliente</label>
               <div class="client-select-wrapper">
@@ -198,15 +207,9 @@
               </div>
             </div>
 
-            <!-- Campo visible si es crédito para inicializar abonos -->
             <div class="form-group" v-if="form.tipo_pago === 'CREDITO'">
               <label>Abonado Inicial (C$)</label>
               <input type="number" step="any" v-model.number="form.abonado" class="form-control" placeholder="0" />
-            </div>
-
-            <div class="form-group">
-              <label>Fecha</label>
-              <input type="date" v-model="form.fecha" required class="form-control" />
             </div>
 
             <div class="modal-actions">
@@ -224,7 +227,7 @@
         <div class="modal confirm-modal">
           <Icon icon="solar:danger-triangle-bold-duotone" class="warn-icon" />
           <h3>¿Eliminar venta?</h3>
-          <p>Esta acción eliminará el registro localmente.</p>
+          <p>Esta acción eliminará el registro localmente y se sincronizará.</p>
           <div class="modal-actions">
             <button class="delete-confirm-btn" @click="deleteVenta">Eliminar</button>
             <button class="cancel-btn" @click="confirmOpen = false">Cancelar</button>
@@ -238,12 +241,16 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { Icon } from '@iconify/vue'
+import { supabase } from '../supabase/supabase.js'
 
 const listaClientes = ref([])
 const ventas = ref([])
 const modalOpen = ref(false)
 const confirmOpen = ref(false)
 const ventaEliminar = ref(null)
+
+const isOnline = ref(navigator.onLine)
+const syncing = ref(false)
 
 const filtroPago = ref('')
 const filtroCliente = ref('')
@@ -268,7 +275,7 @@ const emptyForm = {
 }
 const form = ref({ ...emptyForm })
 
-function cargarClientesLocales() {
+async function cargarClientesLocales() {
   const storedClientes = localStorage.getItem('valle_clientes')
   if (storedClientes) {
     try {
@@ -277,8 +284,18 @@ function cargarClientesLocales() {
     } catch (e) {
       listaClientes.value = []
     }
-  } else {
-    listaClientes.value = ['Juan Pérez', 'María Rodríguez', 'Carlos Gutiérrez', 'Ana Sofía Mendoza']
+  }
+
+  if (navigator.onLine) {
+    try {
+      const { data, error } = await supabase.from('clientes').select('*')
+      if (!error && data) {
+        listaClientes.value = data
+        localStorage.setItem('valle_clientes', JSON.stringify(data))
+      }
+    } catch (e) {
+      console.error('No se pudieron descargar los clientes de Supabase:', e)
+    }
   }
 }
 
@@ -291,30 +308,37 @@ const clientesFiltrados = computed(() => {
   })
 })
 
-onMounted(() => {
-  cargarClientesLocales()
+onMounted(async () => {
+  await cargarClientesLocales()
 
-  const stored = localStorage.getItem('valle_ventas')
+  const stored = localStorage.getItem('valle_ventas_xochil')
   if (stored) {
     try {
       ventas.value = JSON.parse(stored)
     } catch (e) {
       ventas.value = []
     }
-  } else {
-    ventas.value = [
-      { id: 1, cliente: 'Juan Pérez', recarga: 500, monto: 450, tipo_pago: 'CONTADO', abonado: 0, ganancia: 50, fecha: new Date().toISOString().slice(0, 10) },
-      { id: 2, cliente: 'María Rodríguez', recarga: 300, monto: 270, tipo_pago: 'CREDITO', abonado: 100, ganancia: 30, fecha: new Date().toISOString().slice(0, 10) }
-    ]
-    guardarLocalStorage()
   }
 
+  window.addEventListener('online', handleOnlineStatus)
+  window.addEventListener('offline', () => { isOnline.value = false })
   window.addEventListener('storage', handleStorageChange)
+
+  if (isOnline.value) {
+    await sincronizarConSupabase()
+  }
 })
 
 onUnmounted(() => {
+  window.removeEventListener('online', handleOnlineStatus)
+  window.removeEventListener('offline', () => { isOnline.value = false })
   window.removeEventListener('storage', handleStorageChange)
 })
+
+function handleOnlineStatus() {
+  isOnline.value = true
+  sincronizarConSupabase()
+}
 
 function handleStorageChange(event) {
   if (event.key === 'valle_clientes') {
@@ -323,7 +347,94 @@ function handleStorageChange(event) {
 }
 
 function guardarLocalStorage() {
-  localStorage.setItem('valle_ventas', JSON.stringify(ventas.value))
+  localStorage.setItem('valle_ventas_xochil', JSON.stringify(ventas.value))
+}
+
+function limpiarObjetoParaSupabase(venta) {
+  return {
+    id: venta.id,
+    cliente: venta.cliente,
+    recarga: Number(venta.recarga) || 0,
+    monto: Number(venta.monto) || 0,
+    tipo_pago: venta.tipo_pago,
+    abonado: Number(venta.abonado) || 0,
+    ganancia: Number(venta.ganancia) || 0,
+    fecha: venta.fecha
+  }
+}
+
+async function sincronizarConSupabase() {
+  if (syncing.value) return
+  isOnline.value = navigator.onLine
+  if (!isOnline.value) return
+
+  syncing.value = true
+
+  try {
+    const colaClientes = JSON.parse(localStorage.getItem('valle_clientes_cola') || '[]')
+    if (colaClientes.length > 0) {
+      for (const clienteItem of colaClientes) {
+        if (clienteItem._accion === 'delete') {
+          await supabase.from('clientes').delete().eq('id', clienteItem.id)
+        } else {
+          const payloadCliente = {
+            id: clienteItem.id,
+            nombre: clienteItem.nombre,
+            telefono: clienteItem.telefono
+          }
+          await supabase.from('clientes').upsert(payloadCliente)
+        }
+      }
+      localStorage.removeItem('valle_clientes_cola')
+    }
+
+    const colaPendiente = JSON.parse(localStorage.getItem('valle_ventas_cola') || '[]')
+    if (colaPendiente.length > 0) {
+      for (const item of colaPendiente) {
+        if (item._accion === 'delete') {
+          await supabase.from('ventas_xochil').delete().eq('id', item.id)
+        } else {
+          const payloadLimpio = limpiarObjetoParaSupabase(item)
+          await supabase.from('ventas_xochil').upsert(payloadLimpio)
+        }
+      }
+      localStorage.removeItem('valle_ventas_cola')
+    }
+
+    const { data: dataClientes, error: errorClientes } = await supabase
+      .from('clientes')
+      .select('*')
+
+    if (!errorClientes && dataClientes) {
+      listaClientes.value = dataClientes
+      localStorage.setItem('valle_clientes', JSON.stringify(dataClientes))
+    }
+
+    const { data: dataVentas, error: errorVentas } = await supabase
+      .from('ventas_xochil')
+      .select('*')
+      .order('fecha', { ascending: false })
+
+    if (!errorVentas && dataVentas) {
+      ventas.value = dataVentas
+      guardarLocalStorage()
+    }
+  } catch (e) {
+    console.error('Error al sincronizar:', e)
+  } finally {
+    syncing.value = false
+  }
+}
+
+function registrarEnCola(venta, accion = 'upsert') {
+  const cola = JSON.parse(localStorage.getItem('valle_ventas_cola') || '[]')
+  const index = cola.findIndex(item => item.id === venta.id)
+  if (index !== -1) {
+    cola[index] = { ...venta, _accion: accion }
+  } else {
+    cola.push({ ...venta, _accion: accion })
+  }
+  localStorage.setItem('valle_ventas_cola', JSON.stringify(cola))
 }
 
 function calcularGananciaAutomatica() {
@@ -368,27 +479,50 @@ function confirmDelete(venta) {
   confirmOpen.value = true
 }
 
-function deleteVenta() {
-  ventas.value = ventas.value.filter(v => v.id !== ventaEliminar.value.id)
+async function deleteVenta() {
+  const idAEliminar = ventaEliminar.value.id
+  ventas.value = ventas.value.filter(v => v.id !== idAEliminar)
   guardarLocalStorage()
+
+  if (navigator.onLine) {
+    const { error } = await supabase.from('ventas_xochil').delete().eq('id', idAEliminar)
+    if (error) registrarEnCola({ id: idAEliminar }, 'delete')
+  } else {
+    registrarEnCola({ id: idAEliminar }, 'delete')
+  }
+
   confirmOpen.value = false
   ventaEliminar.value = null
 }
 
-function saveVenta() {
+async function saveVenta() {
   if (form.value.tipo_pago !== 'CREDITO') {
     form.value.abonado = 0
   }
-  if (form.value.id) {
+
+  if (!form.value.id) {
+    form.value.id = 'v_' + Date.now() + Math.random().toString(36).substring(2, 7)
+    ventas.value.unshift({ ...form.value })
+  } else {
     const index = ventas.value.findIndex(v => v.id === form.value.id)
     if (index !== -1) {
       ventas.value[index] = { ...form.value }
     }
-  } else {
-    form.value.id = Date.now()
-    ventas.value.unshift({ ...form.value })
   }
+
   guardarLocalStorage()
+  
+  const payloadLimpio = limpiarObjetoParaSupabase(form.value)
+
+  if (navigator.onLine) {
+    const { error } = await supabase.from('ventas_xochil').upsert(payloadLimpio)
+    if (error) {
+      registrarEnCola(form.value)
+    }
+  } else {
+    registrarEnCola(form.value)
+  }
+
   closeModal()
 }
 
@@ -446,7 +580,7 @@ watch([filtroPago, filtroCliente, filtroMes, filtroGeneral], () => {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-}t
+}
 
 .header-logo-icon {
   font-size: 26px;
@@ -457,6 +591,30 @@ watch([filtroPago, filtroCliente, filtroMes, filtroGeneral], () => {
   font-size: 1.2rem;
   font-weight: 700;
   color: #0f172a;
+}
+
+.header-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.sync-status {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.25rem 0.6rem;
+  border-radius: 9999px;
+}
+.sync-status.online { background: #dcfce7; color: #15803d; }
+.sync-status.offline { background: #fee2e2; color: #b91c1c; }
+.sync-status .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
 }
 
 .add-btn {
@@ -471,7 +629,7 @@ watch([filtroPago, filtroCliente, filtroMes, filtroGeneral], () => {
   align-items: center;
   gap: 0.3rem;
   margin-bottom: 10px;
-  margin-left: 70%;
+  margin-left: auto;
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
 }
@@ -572,15 +730,8 @@ watch([filtroPago, filtroCliente, filtroMes, filtroGeneral], () => {
   border-radius: 8px;
 }
 
-.total-icon.monto {
-  background: #eff6ff;
-  color: #3b82f6;
-}
-
-.total-icon.ganancia {
-  background: #f0fdf4;
-  color: #10b981;
-}
+.total-icon.monto { background: #eff6ff; color: #3b82f6; }
+.total-icon.ganancia { background: #f0fdf4; color: #10b981; }
 
 .total-label {
   font-size: 0.65rem;
@@ -602,7 +753,6 @@ watch([filtroPago, filtroCliente, filtroMes, filtroGeneral], () => {
   gap: 0.75rem;
 }
 
-/* Tarjetas profesionales y limpias */
 .card {
   background: #ffffff;
   border-radius: 12px;
@@ -619,22 +769,15 @@ watch([filtroPago, filtroCliente, filtroMes, filtroGeneral], () => {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
 }
 
-.credito-card {
-  border-left: 4px solid #f59e0b;
-}
-
-.cancelada-card {
-  border-left: 4px solid #10b981;
-  background: #fcfdfd;
-}
+.credito-card { border-left: 4px solid #f59e0b; }
+.cancelada-card { border-left: 4px solid #10b981; background: #fcfdfd; }
 
 .card-body {
   padding: 0.85rem;
   cursor: pointer;
-  position: relative; /* Contexto para la fecha absoluta */
+  position: relative;
 }
 
-/* Fecha en la esquina superior derecha */
 .card-date-badge {
   position: absolute;
   top: 0.75rem;
@@ -656,7 +799,7 @@ watch([filtroPago, filtroCliente, filtroMes, filtroGeneral], () => {
   flex-direction: column;
   gap: 0.3rem;
   margin-bottom: 0.6rem;
-  margin-top:20px; /* Espacio para que no choque con la fecha */
+  margin-top: 20px;
 }
 
 .cliente {
@@ -680,22 +823,10 @@ watch([filtroPago, filtroCliente, filtroMes, filtroGeneral], () => {
   letter-spacing: 0.3px;
 }
 
-.badge.contado {
-  background: #dcfce7;
-  color: #15803d;
-}
+.badge.contado { background: #dcfce7; color: #15803d; }
+.badge.credito { background: #fef3c7; color: #b45309; }
+.badge-cancelada { background: #ecfdf5; color: #047857; }
 
-.badge.credito {
-  background: #fef3c7;
-  color: #b45309;
-}
-
-.badge-cancelada {
-  background: #ecfdf5;
-  color: #047857;
-}
-
-/* Detalles limpios en formato clave-valor */
 .card-details {
   display: flex;
   flex-direction: column;
@@ -712,15 +843,8 @@ watch([filtroPago, filtroCliente, filtroMes, filtroGeneral], () => {
   font-size: 0.78rem;
 }
 
-.detail-row .label {
-  color: #64748b;
-  font-weight: 500;
-}
-
-.detail-row .value {
-  color: #1e293b;
-  font-weight: 600;
-}
+.detail-row .label { color: #64748b; font-weight: 500; }
+.detail-row .value { color: #1e293b; font-weight: 600; }
 
 .abonado-text { color: #10b981 !important; }
 .pendiente-text { color: #d97706 !important; }
@@ -757,7 +881,6 @@ watch([filtroPago, filtroCliente, filtroMes, filtroGeneral], () => {
 
 .edit { color: #3b82f6; }
 .edit:hover { background: #eff6ff; }
-
 .delete { color: #ef4444; }
 .delete:hover { background: #fef2f2; }
 
@@ -771,10 +894,7 @@ watch([filtroPago, filtroCliente, filtroMes, filtroGeneral], () => {
   font-size: 0.85rem;
 }
 
-.empty-icon {
-  font-size: 36px;
-  margin-bottom: 0.3rem;
-}
+.empty-icon { font-size: 36px; margin-bottom: 0.3rem; }
 
 .pagination {
   display: flex;
@@ -794,16 +914,8 @@ watch([filtroPago, filtroCliente, filtroMes, filtroGeneral], () => {
   cursor: pointer;
 }
 
-.pagination button:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.pagination span {
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: #64748b;
-}
+.pagination button:disabled { opacity: 0.4; cursor: not-allowed; }
+.pagination span { font-size: 0.8rem; font-weight: 600; color: #64748b; }
 
 .modal-overlay {
   position: fixed;
@@ -833,10 +945,7 @@ watch([filtroPago, filtroCliente, filtroMes, filtroGeneral], () => {
   margin-bottom: 0.75rem;
 }
 
-.modal-header h3 {
-  font-size: 1.05rem;
-  font-weight: 700;
-}
+.modal-header h3 { font-size: 1.05rem; font-weight: 700; }
 
 .close-modal-btn {
   background: none;
@@ -889,14 +998,12 @@ watch([filtroPago, filtroCliente, filtroMes, filtroGeneral], () => {
 }
 
 .form-row {
-  display: grid;
+  dirplay: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0.5rem;
 }
 
-.modal-tipo {
-  margin-top: 2px;
-}
+.modal-tipo { margin-top: 2px; }
 
 .ganancia-input {
   background: #f0fdf4 !important;
@@ -934,16 +1041,8 @@ watch([filtroPago, filtroCliente, filtroMes, filtroGeneral], () => {
   cursor: pointer;
 }
 
-.confirm-modal {
-  text-align: center;
-  max-width: 320px;
-}
-
-.warn-icon {
-  font-size: 40px;
-  color: #f59e0b;
-  margin-bottom: 0.3rem;
-}
+.confirm-modal { text-align: center; max-width: 320px; }
+.warn-icon { font-size: 40px; color: #f59e0b; margin-bottom: 0.3rem; }
 
 .delete-confirm-btn {
   flex: 1;
@@ -968,10 +1067,6 @@ watch([filtroPago, filtroCliente, filtroMes, filtroGeneral], () => {
   .cards { grid-template-columns: repeat(4, 1fr); }
 }
 
-.modal-enter-active, .modal-leave-active {
-  transition: opacity 0.2s ease;
-}
-.modal-enter-from, .modal-leave-to {
-  opacity: 0;
-}
+.modal-enter-active, .modal-leave-active { transition: opacity 0.2s ease; }
+.modal-enter-from, .modal-leave-to { opacity: 0; }
 </style>

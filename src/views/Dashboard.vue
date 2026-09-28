@@ -5,9 +5,6 @@
         <Icon icon="solar:chart-bold-duotone" class="header-logo-icon" />
         <h1>Panel de Reportes y Estadísticas</h1>
       </div>
-      <button class="refresh-btn" @click="cargarDatos">
-        <Icon icon="solar:restart-bold" /> <span class="btn-text">Actualizar</span>
-      </button>
     </header>
 
     <!-- FILTROS POR FECHA -->
@@ -32,6 +29,17 @@
 
     <!-- TARJETAS DE RESUMEN GLOBAL -->
     <div class="metrics-grid">
+      <div class="metric-card">
+        <div class="metric-icon clientes">
+          <Icon icon="solar:users-group-rounded-bold-duotone" />
+        </div>
+        <div class="metric-info">
+          <span class="metric-label">Total Clientes</span>
+          <h3>{{ totalClientes }}</h3>
+          <small>Registrados en sistema</small>
+        </div>
+      </div>
+
       <div class="metric-card">
         <div class="metric-icon ventas">
           <Icon icon="solar:wallet-money-bold-duotone" />
@@ -91,7 +99,30 @@
         </div>
       </div>
 
-      <!-- Reporte 2: Resumen por Tipo de Pago -->
+      <!-- Reporte 2: Mejores Clientes -->
+      <div class="report-card">
+        <div class="report-header">
+          <h3><Icon icon="solar:cup-star-bold-duotone" /> Mejores Clientes</h3>
+          <span class="badge success">Top frecuencia/monto</span>
+        </div>
+        <div class="report-body" v-if="mejoresClientes.length > 0">
+          <div v-for="(c, index) in mejoresClientes" :key="index" class="report-item">
+            <div class="item-main">
+              <strong>{{ index + 1 }}. {{ c.nombre }}</strong>
+              <small>{{ c.compras }} transacciones</small>
+            </div>
+            <div class="item-values">
+              <span class="text-success">C$ {{ c.totalMonto.toLocaleString() }}</span>
+              <span class="text-muted">Total Comprado</span>
+            </div>
+          </div>
+        </div>
+        <div class="empty-report" v-else>
+          <p>No hay datos de clientes suficientes.</p>
+        </div>
+      </div>
+
+      <!-- Reporte 3: Resumen por Tipo de Pago -->
       <div class="report-card">
         <div class="report-header">
           <h3><Icon icon="solar:pie-chart-2-bold-duotone" /> Distribución de Ingresos</h3>
@@ -125,7 +156,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { Icon } from '@iconify/vue'
 
 const meses = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"]
@@ -134,8 +165,9 @@ const filtroMes = ref('')
 const filtroDia = ref('')
 
 const ventasOriginales = ref([])
+const totalClientes = ref(0)
 const creditosPendientesList = ref([])
-const ventasFiltradasList = ref([])
+const mejoresClientes = ref([])
 
 const kpis = ref({
   totalRecarga: 0,
@@ -149,6 +181,7 @@ const kpis = ref({
 })
 
 function cargarDatos() {
+  // 1. Cargar Ventas
   const storedVentas = localStorage.getItem('valle_ventas')
   if (storedVentas) {
     try {
@@ -159,6 +192,20 @@ function cargarDatos() {
   } else {
     ventasOriginales.value = []
   }
+
+  // 2. Cargar Clientes Totales
+  const storedClientes = localStorage.getItem('valle_clientes')
+  if (storedClientes) {
+    try {
+      const parsedClientes = JSON.parse(storedClientes)
+      totalClientes.value = Array.isArray(parsedClientes) ? parsedClientes.length : 0
+    } catch (e) {
+      totalClientes.value = 0
+    }
+  } else {
+    totalClientes.value = 0
+  }
+
   procesarFiltrosYMetricas()
 }
 
@@ -190,14 +237,25 @@ function procesarFiltrosYMetricas() {
   let mCredito = 0
   let tAbonado = 0
   let creditosPendientes = []
+  
+  // Acumulador para calcular mejores clientes
+  let mapaClientes = {}
 
   filtradas.forEach(v => {
     const recarga = Number(v.recarga || 0)
     const ganancia = Number(v.ganancia || 0)
     const abonado = Number(v.abonado || 0)
+    const nombreCliente = v.cliente || 'Cliente General'
 
     tRecarga += recarga
     tGanancias += ganancia
+
+    // Conteo para ranking de mejores clientes
+    if (!mapaClientes[nombreCliente]) {
+      mapaClientes[nombreCliente] = { nombre: nombreCliente, totalMonto: 0, compras: 0 }
+    }
+    mapaClientes[nombreCliente].totalMonto += recarga
+    mapaClientes[nombreCliente].compras += 1
 
     if (v.tipo_pago === 'CONTADO') {
       mContado += recarga
@@ -225,15 +283,34 @@ function procesarFiltrosYMetricas() {
   }
 
   creditosPendientesList.value = creditosPendientes
-  ventasFiltradasList.value = [...filtradas].sort((a, b) => b.id - a.id)
+
+  // Ordenar y extraer el Top 5 de mejores clientes
+  mejoresClientes.value = Object.values(mapaClientes)
+    .sort((a, b) => b.totalMonto - a.totalMonto)
+    .slice(0, 5)
 }
 
 watch([filtroMes, filtroDia], () => {
   procesarFiltrosYMetricas()
 })
 
+const handleStorageChange = (e) => {
+  if (e.key === 'valle_ventas' || e.key === 'valle_clientes') {
+    cargarDatos()
+  }
+}
+
 onMounted(() => {
   cargarDatos()
+  window.addEventListener('storage', handleStorageChange)
+  window.addEventListener('valle_ventas_actualizado', cargarDatos)
+  window.addEventListener('valle_clientes_actualizado', cargarDatos)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('storage', handleStorageChange)
+  window.removeEventListener('valle_ventas_actualizado', cargarDatos)
+  window.removeEventListener('valle_clientes_actualizado', cargarDatos)
 })
 </script>
 
@@ -269,20 +346,6 @@ onMounted(() => {
   font-size: 1.2rem;
   font-weight: 700;
   color: #0f172a;
-}
-
-.refresh-btn {
-  background: #f1f5f9;
-  color: #475569;
-  border: 1px solid #cbd5e1;
-  padding: 0.5rem 0.8rem;
-  border-radius: 10px;
-  font-weight: 600;
-  font-size: 0.85rem;
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-  cursor: pointer;
 }
 
 /* FILTROS CARD */
@@ -347,7 +410,13 @@ onMounted(() => {
 
 @media(min-width: 640px) {
   .metrics-grid {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media(min-width: 1024px) {
+  .metrics-grid {
+    grid-template-columns: repeat(4, 1fr);
   }
 }
 
@@ -371,8 +440,9 @@ onMounted(() => {
   justify-content: center;
 }
 
+.metric-icon.clientes { background: #f0fdf4; color: #10b981; }
 .metric-icon.ventas { background: #eff6ff; color: #3b82f6; }
-.metric-icon.ganancias { background: #f0fdf4; color: #10b981; }
+.metric-icon.ganancias { background: #faf5ff; color: #8b5cf6; }
 .metric-icon.creditos { background: #fef3c7; color: #f59e0b; }
 
 .metric-label {
@@ -409,7 +479,7 @@ onMounted(() => {
   }
 }
 
-.report-card, .recent-section {
+.report-card {
   background: #ffffff;
   padding: 1rem;
   border-radius: 12px;
@@ -506,6 +576,7 @@ onMounted(() => {
 }
 
 .badge.warning { background: #fef3c7; color: #b45309; }
+.badge.success { background: #dcfce7; color: #15803d; }
 
 .empty-report {
   text-align: center;

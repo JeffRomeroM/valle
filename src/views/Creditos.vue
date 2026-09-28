@@ -5,6 +5,14 @@
         <Icon icon="solar:card-send-bold-duotone" class="header-logo-icon" />
         <h1>Gestión de Créditos</h1>
       </div>
+
+      <!-- Indicador de Red Automático -->
+      <div class="header-actions-right">
+        <div class="sync-status" :class="isOnline ? 'online' : 'offline'">
+          <span class="dot"></span>
+          {{ isOnline ? (syncing ? 'Sincronizando...' : 'En línea') : 'Sin conexión' }}
+        </div>
+      </div>
     </header>
 
     <!-- FILTROS -->
@@ -47,12 +55,17 @@
     <div class="cards" v-if="creditosPaginados.length > 0">
       <div v-for="credito in creditosPaginados" :key="credito.id" class="card credito-card" :class="{ 'cancelada-card': esCancelado(credito) }">
         <div class="card-body">
-          <div class="card-header-info">
-            <span class="cliente"><Icon icon="solar:user-bold" /> {{ credito.cliente }}</span>
+          <div class="card-top-row">
+            <small class="card-fecha"><Icon icon="solar:calendar-linear" /> {{ credito.fecha }}</small>
             <span class="badge" :class="esCancelado(credito) ? 'badge-cancelada' : 'credito'">
               {{ esCancelado(credito) ? 'CANCELADA' : 'CRÉDITO' }}
             </span>
           </div>
+
+          <div class="card-header-info">
+            <span class="cliente"><Icon icon="solar:user-bold" /> {{ credito.cliente }}</span>
+          </div>
+
           <div class="card-details">
             <p><Icon icon="solar:card-send-bold-duotone" /> Total Crédito: <strong>C$ {{ credito.recarga }}</strong></p>
             <p class="abonado-text"><Icon icon="solar:hand-money-bold-duotone" /> Abonado: <strong>C$ {{ credito.abonado || 0 }}</strong></p>
@@ -60,7 +73,6 @@
               <Icon :icon="esCancelado(credito) ? 'solar:check-circle-bold' : 'solar:danger-circle-bold-duotone'" /> 
               Pendiente: <strong>C$ {{ (Number(credito.recarga) - Number(credito.abonado || 0)).toFixed(2) }}</strong>
             </p>
-            <small><Icon icon="solar:calendar-linear" /> Fecha: {{ credito.fecha }}</small>
           </div>
         </div>
 
@@ -127,7 +139,7 @@
             </div>
 
             <div class="modal-actions">
-              <button type="submit" class="save-btn" :disabled="montoAbono > deudaPendienteActual">Aplicar Abono</button>
+              <button type="submit" class="save-btn" :disabled="!montoAbono || montoAbono <= 0 || montoAbono > deudaPendienteActual">Aplicar Abono</button>
               <button type="button" class="cancel-btn" @click="closeModal">Cancelar</button>
             </div>
           </form>
@@ -140,11 +152,15 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { Icon } from '@iconify/vue'
+import { supabase } from '../supabase/supabase.js'
 
 const ventas = ref([])
 const modalOpen = ref(false)
 const creditoSeleccionado = ref(null)
-const montoAbono = ref(0)
+const montoAbono = ref('')
+
+const isOnline = ref(navigator.onLine)
+const syncing = ref(false)
 
 const filtroCliente = ref('')
 const filtroGeneral = ref('')
@@ -159,8 +175,8 @@ const form = ref({
   abonado: 0
 })
 
-function cargarVentas() {
-  const stored = localStorage.getItem('valle_ventas')
+async function cargarVentas() {
+  const stored = localStorage.getItem('valle_ventas_xochil')
   if (stored) {
     try {
       ventas.value = JSON.parse(stored)
@@ -168,35 +184,108 @@ function cargarVentas() {
       ventas.value = []
     }
   }
+
+  if (navigator.onLine) {
+    await sincronizarConSupabase()
+  }
 }
 
-onMounted(() => {
-  cargarVentas()
+onMounted(async () => {
+  await cargarVentas()
+
+  window.addEventListener('online', handleOnlineStatus)
+  window.addEventListener('offline', () => { isOnline.value = false })
   window.addEventListener('storage', handleStorageChange)
 })
 
 onUnmounted(() => {
+  window.removeEventListener('online', handleOnlineStatus)
+  window.removeEventListener('offline', () => { isOnline.value = false })
   window.removeEventListener('storage', handleStorageChange)
 })
 
+function handleOnlineStatus() {
+  isOnline.value = true
+  sincronizarConSupabase()
+}
+
 function handleStorageChange(event) {
-  if (event.key === 'valle_ventas') {
+  if (event.key === 'valle_ventas_xochil') {
     cargarVentas()
   }
 }
 
 function guardarLocalStorage() {
-  localStorage.setItem('valle_ventas', JSON.stringify(ventas.value))
+  localStorage.setItem('valle_ventas_xochil', JSON.stringify(ventas.value))
 }
 
-// Función auxiliar para determinar si un crédito ya está cancelado
+function limpiarObjetoParaSupabase(venta) {
+  return {
+    id: venta.id,
+    cliente: venta.cliente,
+    recarga: Number(venta.recarga) || 0,
+    monto: Number(venta.monto) || 0,
+    tipo_pago: venta.tipo_pago,
+    abonado: Number(venta.abonado) || 0,
+    ganancia: Number(venta.ganancia) || 0,
+    fecha: venta.fecha
+  }
+}
+
+async function sincronizarConSupabase() {
+  if (syncing.value) return
+  isOnline.value = navigator.onLine
+  if (!isOnline.value) return
+
+  syncing.value = true
+
+  try {
+    const colaPendiente = JSON.parse(localStorage.getItem('valle_ventas_cola') || '[]')
+    if (colaPendiente.length > 0) {
+      for (const item of colaPendiente) {
+        if (item._accion === 'delete') {
+          await supabase.from('ventas_xochil').delete().eq('id', item.id)
+        } else {
+          const payloadLimpio = limpiarObjetoParaSupabase(item)
+          await supabase.from('ventas_xochil').upsert(payloadLimpio)
+        }
+      }
+      localStorage.removeItem('valle_ventas_cola')
+    }
+
+    const { data, error } = await supabase
+      .from('ventas_xochil')
+      .select('*')
+      .order('fecha', { ascending: false })
+
+    if (!error && data) {
+      ventas.value = data
+      guardarLocalStorage()
+    }
+  } catch (e) {
+    console.error('Error al sincronizar créditos:', e)
+  } finally {
+    syncing.value = false
+  }
+}
+
+function registrarEnCola(venta, accion = 'upsert') {
+  const cola = JSON.parse(localStorage.getItem('valle_ventas_cola') || '[]')
+  const index = cola.findIndex(item => item.id === venta.id)
+  if (index !== -1) {
+    cola[index] = { ...venta, _accion: accion }
+  } else {
+    cola.push({ ...venta, _accion: accion })
+  }
+  localStorage.setItem('valle_ventas_cola', JSON.stringify(cola))
+}
+
 function esCancelado(credito) {
   const recarga = Number(credito.recarga || 0)
   const abonado = Number(credito.abonado || 0)
   return abonado >= recarga
 }
 
-// Mantenemos el filtro que pertenezcan originalmente a tipo CREDITO
 const listaCreditos = computed(() => {
   return ventas.value.filter(v => v.tipo_pago === 'CREDITO')
 })
@@ -248,17 +337,17 @@ function openAbonoModal(credito) {
   if (esCancelado(credito)) return
   creditoSeleccionado.value = credito
   form.value = { ...credito }
-  montoAbono.value = 0
+  montoAbono.value = ''
   modalOpen.value = true
 }
 
 function closeModal() {
   modalOpen.value = false
   creditoSeleccionado.value = null
-  montoAbono.value = 0
+  montoAbono.value = ''
 }
 
-function saveAbono() {
+async function saveAbono() {
   const abonoNum = Number(montoAbono.value) || 0
   if (abonoNum <= 0) return
 
@@ -271,10 +360,21 @@ function saveAbono() {
     const actualAbonado = Number(ventas.value[index].abonado || 0)
     const nuevoAbonado = actualAbonado + abonoNum
     
-    // Solo actualizamos el abonado, asegurando que tipo_pago se quede como 'CREDITO'
     ventas.value[index].abonado = Number(nuevoAbonado.toFixed(2))
 
     guardarLocalStorage()
+
+    const ventaActualizada = ventas.value[index]
+    const payloadLimpio = limpiarObjetoParaSupabase(ventaActualizada)
+
+    if (navigator.onLine) {
+      const { error } = await supabase.from('ventas_xochil').upsert(payloadLimpio)
+      if (error) {
+        registrarEnCola(ventaActualizada)
+      }
+    } else {
+      registrarEnCola(ventaActualizada)
+    }
   }
   closeModal()
 }
@@ -316,6 +416,30 @@ watch([filtroCliente, filtroGeneral], () => {
   font-size: 1.2rem;
   font-weight: 700;
   color: #0f172a;
+}
+
+.header-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.sync-status {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.25rem 0.6rem;
+  border-radius: 9999px;
+}
+.sync-status.online { background: #dcfce7; color: #15803d; }
+.sync-status.offline { background: #fee2e2; color: #b91c1c; }
+.sync-status .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
 }
 
 .filtros-card {
@@ -439,6 +563,22 @@ watch([filtroCliente, filtroGeneral], () => {
   padding: 0.75rem;
 }
 
+.card-top-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.4rem;
+}
+
+.card-fecha {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: #64748b;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
 .card-header-info {
   display: flex;
   flex-direction: column;
@@ -466,7 +606,6 @@ watch([filtroCliente, filtroGeneral], () => {
   padding: 2px 6px;
   border-radius: 4px;
   text-transform: uppercase;
-  width: fit-content;
 }
 
 .badge-cancelada {
@@ -477,7 +616,6 @@ watch([filtroCliente, filtroGeneral], () => {
   padding: 2px 6px;
   border-radius: 4px;
   text-transform: uppercase;
-  width: fit-content;
 }
 
 .card-details p {
@@ -492,15 +630,6 @@ watch([filtroCliente, filtroGeneral], () => {
 .abonado-text { color: #10b981 !important; }
 .pendiente-text { color: #d97706 !important; }
 .saldado-text { color: #047857 !important; }
-
-.card-details small {
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-  color: #94a3b8;
-  font-size: 0.65rem;
-  margin-top: 0.4rem;
-}
 
 .card-actions {
   display: flex;
