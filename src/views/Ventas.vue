@@ -54,6 +54,13 @@
       <div class="total-card">
         <Icon icon="solar:wallet-money-bold-duotone" class="total-icon monto" />
         <div class="total-info">
+          <span class="total-label">Cantidad de Recargas</span>
+          <h3>{{ totalRegistros }}</h3>
+        </div>
+      </div>
+      <div class="total-card">
+        <Icon icon="solar:wallet-money-bold-duotone" class="total-icon monto" />
+        <div class="total-info">
           <span class="total-label">Total Recarga</span>
           <h3>C$ {{ totalRecarga.toLocaleString() }}</h3>
         </div>
@@ -260,6 +267,7 @@ const busquedaClienteModal = ref('')
 
 const paginaActual = ref(1)
 const elementosPorPagina = 6
+const totalRegistros = computed(() => ventasFiltradas.value.length)
 
 const meses = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"]
 
@@ -407,6 +415,9 @@ async function sincronizarConSupabase() {
       .from('ventas_xochil')
       .select('*')
       .order('fecha', { ascending: false })
+
+      console.log("Error devuelto por Supabase:", errorVentas)
+    console.log("Array de ventas recibido:", dataVentas)
 
     if (!errorVentas && dataVentas) {
       ventas.value = dataVentas
