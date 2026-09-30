@@ -7,7 +7,7 @@ import Clientes from '../views/Clientes.vue'
 import Juego from '../views/Juego.vue'
 
 const routes = [
-  { path: '/', redirect: '/dashboard' },
+  { path: '/', redirect: '/ventas' },
   { path: '/dashboard', component: Dashboard },
   { path: '/ventas', component: Ventas },
   { path: '/creditos', component: Creditos },

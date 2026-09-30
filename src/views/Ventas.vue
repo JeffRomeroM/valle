@@ -6,7 +6,7 @@
         <h1>Gestión de Ventas</h1>
       </div>
       
-      <!-- Indicador de Red (Sin botón manual) -->
+      <!-- Indicador de Red -->
       <div class="header-actions-right">
         <div class="sync-status" :class="isOnline ? 'online' : 'offline'">
           <span class="dot"></span>
@@ -268,33 +268,21 @@ const emptyForm = {
   cliente: '',
   recarga: null,
   monto: null,
-  tipo_pago: 'CONTADO',
+  tipo_pago: 'CREDITO', // <--- Ajustado por defecto a CREDITO
   abonado: 0,
   ganancia: 0,
   fecha: new Date().toISOString().slice(0, 10)
 }
 const form = ref({ ...emptyForm })
 
-async function cargarClientesLocales() {
-  const storedClientes = localStorage.getItem('valle_clientes')
+function cargarClientesLocales() {
+  const storedClientes = localStorage.getItem('valle_clientes_xochil')
   if (storedClientes) {
     try {
       const parsed = JSON.parse(storedClientes)
       listaClientes.value = Array.isArray(parsed) ? parsed : []
     } catch (e) {
       listaClientes.value = []
-    }
-  }
-
-  if (navigator.onLine) {
-    try {
-      const { data, error } = await supabase.from('clientes').select('*')
-      if (!error && data) {
-        listaClientes.value = data
-        localStorage.setItem('valle_clientes', JSON.stringify(data))
-      }
-    } catch (e) {
-      console.error('No se pudieron descargar los clientes de Supabase:', e)
     }
   }
 }
@@ -309,7 +297,7 @@ const clientesFiltrados = computed(() => {
 })
 
 onMounted(async () => {
-  await cargarClientesLocales()
+  cargarClientesLocales()
 
   const stored = localStorage.getItem('valle_ventas_xochil')
   if (stored) {
@@ -325,7 +313,7 @@ onMounted(async () => {
   window.addEventListener('storage', handleStorageChange)
 
   if (isOnline.value) {
-    await sincronizarConSupabase()
+    sincronizarConSupabase()
   }
 })
 
@@ -341,7 +329,7 @@ function handleOnlineStatus() {
 }
 
 function handleStorageChange(event) {
-  if (event.key === 'valle_clientes') {
+  if (event.key === 'valle_clientes_xochil') {
     cargarClientesLocales()
   }
 }
@@ -371,21 +359,21 @@ async function sincronizarConSupabase() {
   syncing.value = true
 
   try {
-    const colaClientes = JSON.parse(localStorage.getItem('valle_clientes_cola') || '[]')
+    const colaClientes = JSON.parse(localStorage.getItem('valle_clientes_xochil_cola') || '[]')
     if (colaClientes.length > 0) {
       for (const clienteItem of colaClientes) {
         if (clienteItem._accion === 'delete') {
-          await supabase.from('clientes').delete().eq('id', clienteItem.id)
+          await supabase.from('clientes_xochil').delete().eq('id', clienteItem.id)
         } else {
           const payloadCliente = {
             id: clienteItem.id,
             nombre: clienteItem.nombre,
             telefono: clienteItem.telefono
           }
-          await supabase.from('clientes').upsert(payloadCliente)
+          await supabase.from('clientes_xochil').upsert(payloadCliente)
         }
       }
-      localStorage.removeItem('valle_clientes_cola')
+      localStorage.removeItem('valle_clientes_xochil_cola')
     }
 
     const colaPendiente = JSON.parse(localStorage.getItem('valle_ventas_cola') || '[]')
@@ -401,13 +389,18 @@ async function sincronizarConSupabase() {
       localStorage.removeItem('valle_ventas_cola')
     }
 
-    const { data: dataClientes, error: errorClientes } = await supabase
-      .from('clientes')
-      .select('*')
+    // Consulta dirigida a clientes_xochil
+    try {
+      const { data: dataClientes, error: errorClientes } = await supabase
+        .from('clientes_xochil')
+        .select('*')
 
-    if (!errorClientes && dataClientes) {
-      listaClientes.value = dataClientes
-      localStorage.setItem('valle_clientes', JSON.stringify(dataClientes))
+      if (!errorClientes && dataClientes) {
+        listaClientes.value = dataClientes
+        localStorage.setItem('valle_clientes_xochil', JSON.stringify(dataClientes))
+      }
+    } catch (err) {
+      console.warn('No se pudo sincronizar la tabla clientes_xochil:', err)
     }
 
     const { data: dataVentas, error: errorVentas } = await supabase
@@ -998,7 +991,7 @@ watch([filtroPago, filtroCliente, filtroMes, filtroGeneral], () => {
 }
 
 .form-row {
-  dirplay: grid;
+  display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0.5rem;
 }
