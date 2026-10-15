@@ -76,28 +76,7 @@
 
     <!-- SECCIÓN DE REPORTES DETALLADOS -->
     <div class="reports-grid">
-      <!-- Reporte 1: Estado de Créditos y Cobros -->
-      <div class="report-card">
-        <div class="report-header">
-          <h3><Icon icon="solar:card-send-bold-duotone" /> Estado de Créditos</h3>
-          <span class="badge warning">{{ kpis.creditosActivos }} pendientes</span>
-        </div>
-        <div class="report-body" v-if="creditosPendientesList.length > 0">
-          <div v-for="item in creditosPendientesList" :key="item.id" class="report-item">
-            <div class="item-main">
-              <strong>{{ item.cliente }}</strong>
-              <small>{{ item.fecha }}</small>
-            </div>
-            <div class="item-values">
-              <span class="text-danger">Debe: C$ {{ (Number(item.recarga) - Number(item.abonado || 0)).toFixed(2) }}</span>
-              <span class="text-muted">Total Recarga: C$ {{ item.recarga }}</span>
-            </div>
-          </div>
-        </div>
-        <div class="empty-report" v-else>
-          <p>No hay créditos pendientes bajo este filtro.</p>
-        </div>
-      </div>
+      
 
       <!-- Reporte 2: Mejores Clientes -->
       <div class="report-card">
@@ -156,8 +135,9 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { Icon } from '@iconify/vue'
+import { supabase } from '../supabase/supabase.js'
 
 const meses = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"]
 
@@ -180,21 +160,18 @@ const kpis = ref({
   totalAbonado: 0
 })
 
-function cargarDatos() {
-  // 1. Cargar Ventas
-  const storedVentas = localStorage.getItem('valle_ventas')
+async function cargarDatos() {
+  // 1. Cargar desde LocalStorage con las claves correctas (_xochil)
+  const storedVentas = localStorage.getItem('valle_ventas_xochil')
   if (storedVentas) {
     try {
       ventasOriginales.value = JSON.parse(storedVentas)
     } catch (e) {
       ventasOriginales.value = []
     }
-  } else {
-    ventasOriginales.value = []
   }
 
-  // 2. Cargar Clientes Totales
-  const storedClientes = localStorage.getItem('valle_clientes')
+  const storedClientes = localStorage.getItem('valle_clientes_xochil')
   if (storedClientes) {
     try {
       const parsedClientes = JSON.parse(storedClientes)
@@ -202,11 +179,42 @@ function cargarDatos() {
     } catch (e) {
       totalClientes.value = 0
     }
-  } else {
-    totalClientes.value = 0
   }
 
   procesarFiltrosYMetricas()
+
+  // 2. Si hay conexión a internet, obtener los datos actualizados desde Supabase
+  if (navigator.onLine) {
+    await sincronizarConSupabase()
+  }
+}
+
+async function sincronizarConSupabase() {
+  try {
+    // Sincronizar clientes
+    const { data: dataClientes, error: errorClientes } = await supabase
+      .from('clientes_xochil')
+      .select('*')
+
+    if (!errorClientes && dataClientes) {
+      totalClientes.value = dataClientes.length
+      localStorage.setItem('valle_clientes_xochil', JSON.stringify(dataClientes))
+    }
+
+    // Sincronizar ventas
+    const { data: dataVentas, error: errorVentas } = await supabase
+      .from('ventas_xochil')
+      .select('*')
+      .order('fecha', { ascending: false })
+
+    if (!errorVentas && dataVentas) {
+      ventasOriginales.value = dataVentas
+      localStorage.setItem('valle_ventas_xochil', JSON.stringify(dataVentas))
+      procesarFiltrosYMetricas()
+    }
+  } catch (err) {
+    console.warn('Error al sincronizar dashboard con Supabase:', err)
+  }
 }
 
 function limpiarFiltros() {
@@ -238,7 +246,6 @@ function procesarFiltrosYMetricas() {
   let tAbonado = 0
   let creditosPendientes = []
   
-  // Acumulador para calcular mejores clientes
   let mapaClientes = {}
 
   filtradas.forEach(v => {
@@ -250,7 +257,6 @@ function procesarFiltrosYMetricas() {
     tRecarga += recarga
     tGanancias += ganancia
 
-    // Conteo para ranking de mejores clientes
     if (!mapaClientes[nombreCliente]) {
       mapaClientes[nombreCliente] = { nombre: nombreCliente, totalMonto: 0, compras: 0 }
     }
@@ -284,7 +290,6 @@ function procesarFiltrosYMetricas() {
 
   creditosPendientesList.value = creditosPendientes
 
-  // Ordenar y extraer el Top 5 de mejores clientes
   mejoresClientes.value = Object.values(mapaClientes)
     .sort((a, b) => b.totalMonto - a.totalMonto)
     .slice(0, 5)
@@ -295,7 +300,7 @@ watch([filtroMes, filtroDia], () => {
 })
 
 const handleStorageChange = (e) => {
-  if (e.key === 'valle_ventas' || e.key === 'valle_clientes') {
+  if (e.key === 'valle_ventas_xochil' || e.key === 'valle_clientes_xochil') {
     cargarDatos()
   }
 }
@@ -303,14 +308,10 @@ const handleStorageChange = (e) => {
 onMounted(() => {
   cargarDatos()
   window.addEventListener('storage', handleStorageChange)
-  window.addEventListener('valle_ventas_actualizado', cargarDatos)
-  window.addEventListener('valle_clientes_actualizado', cargarDatos)
 })
 
 onUnmounted(() => {
   window.removeEventListener('storage', handleStorageChange)
-  window.removeEventListener('valle_ventas_actualizado', cargarDatos)
-  window.removeEventListener('valle_clientes_actualizado', cargarDatos)
 })
 </script>
 
