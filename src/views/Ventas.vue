@@ -75,6 +75,46 @@
       </div>
     </div>
 
+    <!-- RESUMEN DE CRÉDITOS -->
+    <section class="credito-resumen" v-if="resumenCredito.cantidad > 0">
+      <h2 class="resumen-title">
+        <Icon icon="solar:bill-list-bold-duotone" /> Resumen de créditos
+      </h2>
+
+      <div class="resumen-grid">
+        <div class="resumen-card">
+          <span class="total-label">Total a crédito</span>
+          <h3>C$ {{ fmt(resumenCredito.total) }}</h3>
+          <small>{{ resumenCredito.cantidad }} {{ resumenCredito.cantidad === 1 ? 'venta' : 'ventas' }}</small>
+        </div>
+
+        <div class="resumen-card cancelado">
+          <span class="total-label">Ya cancelado</span>
+          <h3>C$ {{ fmt(resumenCredito.canceladoMonto) }}</h3>
+          <small>{{ resumenCredito.canceladas }} {{ resumenCredito.canceladas === 1 ? 'cancelada' : 'canceladas' }}</small>
+        </div>
+
+        <div class="resumen-card pendiente">
+          <span class="total-label">Pendiente de pagar</span>
+          <h3>C$ {{ fmt(resumenCredito.pendiente) }}</h3>
+          <small>{{ resumenCredito.pendientes }} con saldo</small>
+        </div>
+      </div>
+
+      <div class="progreso">
+        <div class="progreso-info">
+          <span>Cobrado: <strong>C$ {{ fmt(resumenCredito.cobrado) }}</strong></span>
+          <span>{{ resumenCredito.porcentaje }}%</span>
+        </div>
+        <div class="progreso-barra">
+          <div class="progreso-relleno" :style="{ width: resumenCredito.porcentaje + '%' }"></div>
+        </div>
+        <small class="progreso-nota" v-if="resumenCredito.parcial > 0">
+          Incluye C$ {{ fmt(resumenCredito.parcial) }} en abonos parciales de ventas aún pendientes.
+        </small>
+      </div>
+    </section>
+
     <button class="add-btn" @click="openModal()">
       <Icon icon="solar:add-circle-bold" /> <span class="btn-text">Agregar Venta</span>
     </button>
@@ -114,7 +154,7 @@
               <div class="detail-row">
                 <span class="label">Pendiente:</span>
                 <span class="value" :class="esCancelado(venta) ? 'saldado-text' : 'pendiente-text'">
-                  C$ {{ (Number(venta.recarga) - Number(venta.abonado || 0)).toFixed(2) }}
+                  C$ {{ fmt(saldoPendiente(venta)) }}
                 </span>
               </div>
             </template>
@@ -447,11 +487,30 @@ function calcularGananciaAutomatica() {
   form.value.ganancia = Number((recarga - monto).toFixed(2))
 }
 
+function fmt(n) {
+  return Number(n || 0).toLocaleString('es-NI', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  })
+}
+
+// Lo que realmente se ha cobrado (nunca más que la recarga)
+function montoCobrado(venta) {
+  const recarga = Number(venta.recarga) || 0
+  const abonado = Number(venta.abonado) || 0
+  return Math.min(abonado, recarga)
+}
+
+function saldoPendiente(venta) {
+  return (Number(venta.recarga) || 0) - montoCobrado(venta)
+}
+
+// Una venta a crédito está cancelada cuando lo abonado cubre la recarga
+// (el mismo valor que se usa para calcular el "Pendiente" de la tarjeta)
 function esCancelado(venta) {
   if (venta.tipo_pago !== 'CREDITO') return false
-  const monto = Number(venta.monto || 0)
-  const abonado = Number(venta.abonado || 0)
-  return abonado >= monto
+  const recarga = Number(venta.recarga) || 0
+  return recarga > 0 && (Number(venta.abonado) || 0) >= recarga
 }
 
 function getBadgeClass(venta) {
@@ -549,6 +608,40 @@ const ventasFiltradas = computed(() => {
 
 const totalRecarga = computed(() => ventasFiltradas.value.reduce((sum, v) => sum + Number(v.recarga || 0), 0))
 const totalGanancia = computed(() => ventasFiltradas.value.reduce((sum, v) => sum + Number(v.ganancia || 0), 0))
+
+// Resumen de ventas a crédito (respeta los filtros activos)
+const resumenCredito = computed(() => {
+  const r = {
+    cantidad: 0,
+    total: 0,
+    cobrado: 0,
+    pendiente: 0,
+    canceladas: 0,
+    canceladoMonto: 0,
+    pendientes: 0
+  }
+
+  for (const v of ventasFiltradas.value) {
+    if (v.tipo_pago !== 'CREDITO') continue
+    const recarga = Number(v.recarga) || 0
+
+    r.cantidad++
+    r.total += recarga
+    r.cobrado += montoCobrado(v)
+
+    if (esCancelado(v)) {
+      r.canceladas++
+      r.canceladoMonto += recarga
+    } else {
+      r.pendientes++
+      r.pendiente += saldoPendiente(v)
+    }
+  }
+
+  r.parcial = r.cobrado - r.canceladoMonto
+  r.porcentaje = r.total ? Math.round((r.cobrado / r.total) * 100) : 0
+  return r
+})
 
 const totalPaginas = computed(() => Math.ceil(ventasFiltradas.value.length / elementosPorPagina) || 1)
 
@@ -749,6 +842,91 @@ watch([filtroPago, filtroCliente, filtroMes, filtroGeneral], () => {
   font-size: 0.95rem;
   font-weight: 700;
   color: #0f172a;
+}
+
+.credito-resumen {
+  background: #ffffff;
+  border: 1px solid #f1f5f9;
+  border-radius: 12px;
+  padding: 0.75rem;
+  margin-bottom: 1rem;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.02);
+}
+
+.resumen-title {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #0f172a;
+  margin-bottom: 0.6rem;
+}
+
+.resumen-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+}
+
+.resumen-card {
+  background: #f8fafc;
+  border-radius: 10px;
+  padding: 0.6rem;
+  border-left: 4px solid #3b82f6;
+}
+
+.resumen-card.cancelado { border-left-color: #10b981; background: #f0fdf4; }
+.resumen-card.pendiente { border-left-color: #f59e0b; background: #fffbeb; }
+
+.resumen-card h3 {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 0.15rem 0;
+}
+
+.resumen-card.cancelado h3 { color: #047857; }
+.resumen-card.pendiente h3 { color: #b45309; }
+
+.resumen-card small {
+  font-size: 0.65rem;
+  color: #64748b;
+}
+
+.progreso { margin-top: 0.7rem; }
+
+.progreso-info {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: #475569;
+  margin-bottom: 0.3rem;
+}
+
+.progreso-barra {
+  height: 8px;
+  background: #fef3c7;
+  border-radius: 9999px;
+  overflow: hidden;
+}
+
+.progreso-relleno {
+  height: 100%;
+  background: #10b981;
+  border-radius: 9999px;
+  transition: width 0.3s ease;
+}
+
+.progreso-nota {
+  display: block;
+  margin-top: 0.3rem;
+  font-size: 0.65rem;
+  color: #94a3b8;
+}
+
+@media(max-width: 480px) {
+  .resumen-grid { grid-template-columns: 1fr; }
 }
 
 .cards {

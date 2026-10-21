@@ -33,53 +33,86 @@
       </div>
     </div>
 
-    <!-- TOTALES DE CRÉDITO -->
-    <div class="totales-grid">
-      <div class="total-card">
-        <Icon icon="solar:wallet-money-bold-duotone" class="total-icon deuda" />
-        <div class="total-info">
-          <span class="total-label">Deuda Total Pendiente</span>
-          <h3>C$ {{ totalPendiente.toLocaleString() }}</h3>
-        </div>
-      </div>
-      <div class="total-card">
-        <Icon icon="solar:check-read-bold-duotone" class="total-icon abonado" />
-        <div class="total-info">
-          <span class="total-label">Total Abonado</span>
-          <h3>C$ {{ totalAbonadoGeneral.toLocaleString() }}</h3>
-        </div>
-      </div>
-    </div>
 
-    <!-- LISTADO DE CRÉDITOS -->
+    <!-- RESUMEN DE CRÉDITOS (Con barra de porcentaje idéntica a Ventas) -->
+    <section class="credito-resumen" v-if="resumenCredito.cantidad > 0">
+      <h2 class="resumen-title">
+        <Icon icon="solar:bill-list-bold-duotone" /> Resumen de créditos
+      </h2>
+
+      <div class="resumen-grid">
+        <div class="resumen-card">
+          <span class="total-label">Total a crédito</span>
+          <h3>C$ {{ fmt(resumenCredito.total) }}</h3>
+          <small>{{ resumenCredito.cantidad }} {{ resumenCredito.cantidad === 1 ? 'crédito' : 'créditos' }}</small>
+        </div>
+
+        <div class="resumen-card cancelado">
+          <span class="total-label">Ya cancelado</span>
+          <h3>C$ {{ totalAbonadoGeneral.toLocaleString() }}</h3>
+          <small>{{ resumenCredito.canceladas }} {{ resumenCredito.canceladas === 1 ? 'cancelada' : 'canceladas' }}</small>
+        </div>
+
+        <div class="resumen-card pendiente">
+          <span class="total-label">Pendiente de pagar</span>
+          <h3>C$ {{ fmt(resumenCredito.pendiente) }}</h3>
+          <small>{{ resumenCredito.pendientes }} con saldo</small>
+        </div>
+      </div>
+
+      <div class="progreso">
+        <div class="progreso-info">
+          <span>Cobrado: <strong>C$ {{ fmt(resumenCredito.cobrado) }}</strong></span>
+          <span>{{ resumenCredito.porcentaje }}%</span>
+        </div>
+        <div class="progreso-barra">
+          <div class="progreso-relleno" :style="{ width: resumenCredito.porcentaje + '%' }"></div>
+        </div>
+        <small class="progreso-nota" v-if="resumenCredito.parcial > 0">
+          Incluye C$ {{ fmt(resumenCredito.parcial) }} en abonos parciales de créditos aún pendientes.
+        </small>
+      </div>
+    </section>
+
+    <!-- LISTADO DE TARJETAS (Diseño idéntico a Ventas) -->
     <div class="cards" v-if="creditosPaginados.length > 0">
-      <div v-for="credito in creditosPaginados" :key="credito.id" class="card credito-card" :class="{ 'cancelada-card': esCancelado(credito) }">
-        <div class="card-body">
-          <div class="card-top-row">
-            <small class="card-fecha"><Icon icon="solar:calendar-linear" /> {{ credito.fecha }}</small>
+      <div v-for="credito in creditosPaginados" :key="credito.id" 
+           class="card" 
+           :class="{ 
+             'credito-card': !esCancelado(credito), 
+             'cancelada-card': esCancelado(credito) 
+           }">
+        <div class="card-body" @click="!esCancelado(credito) && openAbonoModal(credito)">
+          <span class="card-date-badge"><Icon icon="solar:calendar-linear" /> {{ credito.fecha }}</span>
+          <div class="card-header-info">
+            <span class="cliente"><Icon icon="solar:user-bold" /> {{ credito.cliente }}</span>
             <span class="badge" :class="esCancelado(credito) ? 'badge-cancelada' : 'credito'">
-              {{ esCancelado(credito) ? 'CANCELADA' : 'CRÉDITO' }}
+              {{ esCancelado(credito) ? 'CANCELADA' : 'Créd.' }}
             </span>
           </div>
 
-          <div class="card-header-info">
-            <span class="cliente"><Icon icon="solar:user-bold" /> {{ credito.cliente }}</span>
-          </div>
-
           <div class="card-details">
-            <p><Icon icon="solar:card-send-bold-duotone" /> Total Crédito: <strong>C$ {{ credito.recarga }}</strong></p>
-            <p class="abonado-text"><Icon icon="solar:hand-money-bold-duotone" /> Abonado: <strong>C$ {{ credito.abonado || 0 }}</strong></p>
-            <p :class="esCancelado(credito) ? 'saldado-text' : 'pendiente-text'">
-              <Icon :icon="esCancelado(credito) ? 'solar:check-circle-bold' : 'solar:danger-circle-bold-duotone'" /> 
-              Pendiente: <strong>C$ {{ (Number(credito.recarga) - Number(credito.abonado || 0)).toFixed(2) }}</strong>
-            </p>
+            <div class="detail-row">
+              <span class="label">Total Crédito:</span>
+              <span class="value">C$ {{ credito.recarga }}</span>
+            </div>
+            <div class="detail-row">
+              <span class="label">Abonado:</span>
+              <span class="value abonado-text">C$ {{ credito.abonado || 0 }}</span>
+            </div>
+            <div class="detail-row">
+              <span class="label">Pendiente:</span>
+              <span class="value" :class="esCancelado(credito) ? 'saldado-text' : 'pendiente-text'">
+                C$ {{ (Number(credito.recarga) - Number(credito.abonado || 0)).toFixed(2) }}
+              </span>
+            </div>
           </div>
         </div>
 
         <div class="card-actions">
           <button 
             class="abonar-btn" 
-            @click="openAbonoModal(credito)" 
+            @click.stop="openAbonoModal(credito)" 
             :disabled="esCancelado(credito)"
             :title="esCancelado(credito) ? 'Crédito ya cancelado' : 'Registrar Abono / Pago'"
           >
@@ -280,10 +313,27 @@ function registrarEnCola(venta, accion = 'upsert') {
   localStorage.setItem('valle_ventas_cola', JSON.stringify(cola))
 }
 
+function fmt(n) {
+  return Number(n || 0).toLocaleString('es-NI', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  })
+}
+
+function montoCobrado(credito) {
+  const recarga = Number(credito.recarga) || 0
+  const abonado = Number(credito.abonado) || 0
+  return Math.min(abonado, recarga)
+}
+
+function saldoPendiente(credito) {
+  return (Number(credito.recarga) || 0) - montoCobrado(credito)
+}
+
 function esCancelado(credito) {
   const recarga = Number(credito.recarga || 0)
   const abonado = Number(credito.abonado || 0)
-  return abonado >= recarga
+  return recarga > 0 && abonado >= recarga
 }
 
 const listaCreditos = computed(() => {
@@ -291,16 +341,25 @@ const listaCreditos = computed(() => {
 })
 
 const clientesConCredito = computed(() => {
-  const unicos = new Set(listaCreditos.value.map(c => c.cliente))
+  const unicos = new Set(
+    listaCreditos.value
+      .map(c => c.cliente ? c.cliente.trim() : '')
+      .filter(cliente => cliente !== '') // Ignora valores vacíos o nulos
+  )
   return Array.from(unicos)
 })
 
 const creditosFiltrados = computed(() => {
   return listaCreditos.value.filter(c => {
-    if (filtroCliente.value && c.cliente !== filtroCliente.value) return false
+    const nombreCliente = (c.cliente || '').trim()
+
+    // Si seleccionó un cliente específico
+    if (filtroCliente.value && nombreCliente !== filtroCliente.value) return false
+
+    // Buscador general
     if (filtroGeneral.value) {
       const texto = filtroGeneral.value.toLowerCase()
-      if (!c.cliente.toLowerCase().includes(texto)) return false
+      if (!nombreCliente.toLowerCase().includes(texto)) return false
     }
     return true
   })
@@ -316,6 +375,39 @@ const totalPendiente = computed(() => {
 
 const totalAbonadoGeneral = computed(() => {
   return creditosFiltrados.value.reduce((sum, c) => sum + Number(c.abonado || 0), 0)
+})
+
+// Resumen de créditos con barra de porcentaje (exactamente igual a Ventas.vue)
+const resumenCredito = computed(() => {
+  const r = {
+    cantidad: 0,
+    total: 0,
+    cobrado: 0,
+    pendiente: 0,
+    canceladas: 0,
+    canceladoMonto: 0,
+    pendientes: 0
+  }
+
+  for (const c of creditosFiltrados.value) {
+    const recarga = Number(c.recarga) || 0
+
+    r.cantidad++
+    r.total += recarga
+    r.cobrado += montoCobrado(c)
+
+    if (esCancelado(c)) {
+      r.canceladas++
+      r.canceladoMonto += recarga
+    } else {
+      r.pendientes++
+      r.pendiente += saldoPendiente(c)
+    }
+  }
+
+  r.parcial = r.cobrado - r.canceladoMonto
+  r.porcentaje = r.total ? Math.round((r.cobrado / r.total) * 100) : 0
+  return r
 })
 
 const totalPaginas = computed(() => Math.ceil(creditosFiltrados.value.length / elementosPorPagina) || 1)
@@ -533,6 +625,92 @@ watch([filtroCliente, filtroGeneral], () => {
   color: #0f172a;
 }
 
+/* Estilos de Resumen / Barra de Porcentaje idénticos a Ventas.vue */
+.credito-resumen {
+  background: #ffffff;
+  border: 1px solid #f1f5f9;
+  border-radius: 12px;
+  padding: 0.75rem;
+  margin-bottom: 1rem;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.02);
+}
+
+.resumen-title {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #0f172a;
+  margin-bottom: 0.6rem;
+}
+
+.resumen-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+}
+
+.resumen-card {
+  background: #f8fafc;
+  border-radius: 10px;
+  padding: 0.6rem;
+  border-left: 4px solid #3b82f6;
+}
+
+.resumen-card.cancelado { border-left-color: #10b981; background: #f0fdf4; }
+.resumen-card.pendiente { border-left-color: #f59e0b; background: #fffbeb; }
+
+.resumen-card h3 {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 0.15rem 0;
+}
+
+.resumen-card.cancelado h3 { color: #047857; }
+.resumen-card.pendiente h3 { color: #b45309; }
+
+.resumen-card small {
+  font-size: 0.65rem;
+  color: #64748b;
+}
+
+.progreso { margin-top: 0.7rem; }
+
+.progreso-info {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: #475569;
+  margin-bottom: 0.3rem;
+}
+
+.progreso-barra {
+  height: 8px;
+  background: #fef3c7;
+  border-radius: 9999px;
+  overflow: hidden;
+}
+
+.progreso-relleno {
+  height: 100%;
+  background: #10b981;
+  border-radius: 9999px;
+  transition: width 0.3s ease;
+}
+
+.progreso-nota {
+  display: block;
+  margin-top: 0.3rem;
+  font-size: 0.65rem;
+  color: #94a3b8;
+}
+
+@media(max-width: 480px) {
+  .resumen-grid { grid-template-columns: 1fr; }
+}
+
 .cards {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -542,90 +720,94 @@ watch([filtroCliente, filtroGeneral], () => {
 .card {
   background: #ffffff;
   border-radius: 12px;
-  border: 1px solid #f1f5f9;
+  border: 1px solid #e2e8f0;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
   display: flex;
   flex-direction: column;
   justify-content: space-between;
   overflow: hidden;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
-.credito-card {
-  border-left: 3px solid #f59e0b;
+.card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
 }
 
-.cancelada-card {
-  border-left: 3px solid #10b981;
-  background: #fcfdfd;
-}
+.credito-card { border-left: 4px solid #f59e0b; }
+.cancelada-card { border-left: 4px solid #10b981; background: #fcfdfd; }
 
 .card-body {
-  padding: 0.75rem;
+  padding: 0.85rem;
+  cursor: pointer;
+  position: relative;
 }
 
-.card-top-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.4rem;
-}
-
-.card-fecha {
+.card-date-badge {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.85rem;
   display: flex;
   align-items: center;
-  gap: 0.3rem;
+  gap: 0.2rem;
   color: #64748b;
   font-size: 0.7rem;
-  font-weight: 600;
+  font-weight: 500;
+  background: #f8fafc;
+  padding: 2px 6px;
+  border-radius: 6px;
+  border: 1px solid #f1f5f9;
 }
 
 .card-header-info {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
-  margin-bottom: 0.5rem;
+  gap: 0.3rem;
+  margin-bottom: 0.6rem;
+  margin-top: 20px;
 }
 
 .cliente {
   font-weight: 700;
-  font-size: 0.85rem;
+  font-size: 0.9rem;
   color: #0f172a;
   display: flex;
   align-items: center;
   gap: 0.3rem;
-  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.badge.credito {
-  background: #fef3c7;
-  color: #b45309;
+.badge {
   font-size: 0.6rem;
   font-weight: 700;
   padding: 2px 6px;
   border-radius: 4px;
   text-transform: uppercase;
+  width: fit-content;
+  letter-spacing: 0.3px;
 }
 
-.badge-cancelada {
-  background: #ecfdf5;
-  color: #047857;
-  font-size: 0.6rem;
-  font-weight: 700;
-  padding: 2px 6px;
-  border-radius: 4px;
-  text-transform: uppercase;
-}
+.badge.credito { background: #fef3c7; color: #b45309; }
+.badge-cancelada { background: #ecfdf5; color: #047857; }
 
-.card-details p {
+.card-details {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 0.3rem;
-  font-size: 0.75rem;
-  color: #475569;
-  margin: 0.2rem 0;
+  border-top: 1px solid #f1f5f9;
+  padding-top: 0.5rem;
+  margin-top: 0.2rem;
 }
+
+.detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.78rem;
+}
+
+.detail-row .label { color: #64748b; font-weight: 500; }
+.detail-row .value { color: #1e293b; font-weight: 600; }
 
 .abonado-text { color: #10b981 !important; }
 .pendiente-text { color: #d97706 !important; }
@@ -644,12 +826,13 @@ watch([filtroCliente, filtroGeneral], () => {
   padding: 0.5rem;
   color: #d97706;
   font-weight: 600;
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 0.3rem;
   cursor: pointer;
+  transition: background 0.15s ease;
 }
 .abonar-btn:hover:not(:disabled) {
   background: #fef3c7;
@@ -749,6 +932,8 @@ watch([filtroCliente, filtroGeneral], () => {
 
 @media(min-width: 640px) {
   .cards { grid-template-columns: repeat(3, 1fr); }
+  .creditos-container { padding: 1.5rem; }
+  .header h1 { font-size: 1.5rem; }
 }
 @media(min-width: 1024px) {
   .cards { grid-template-columns: repeat(4, 1fr); }
